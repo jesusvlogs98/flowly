@@ -2,9 +2,15 @@ import * as React from "react";
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { useTranslation } from "react-i18next";
-import { CalendarDays, LayoutDashboard, CheckSquare, Bell, StickyNote, Sun, Moon } from "lucide-react";
+import { CalendarDays, LayoutDashboard, CheckSquare, Bell, StickyNote, Sun, Moon, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface LayoutProps {
   children: ReactNode;
@@ -33,12 +39,42 @@ function ThemeToggle() {
       className="rounded-full"
     >
       {theme === "light" ? (
-        <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+        <Sun className="h-5 w-5" />
       ) : (
-        <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+        <Moon className="h-5 w-5" />
       )}
       <span className="sr-only">Toggle theme</span>
     </Button>
+  );
+}
+
+function LanguageSelector() {
+  const { t, i18n } = useTranslation();
+  const currentLang = i18n.language?.startsWith("es") ? "es" : "en";
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="rounded-full" title={t("settings.language")}>
+          <Globe className="h-5 w-5" />
+          <span className="sr-only">{t("settings.language")}</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem
+          onClick={() => i18n.changeLanguage("en")}
+          className={cn(currentLang === "en" && "font-bold text-primary")}
+        >
+          🇺🇸 {t("settings.english")}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => i18n.changeLanguage("es")}
+          className={cn(currentLang === "es" && "font-bold text-primary")}
+        >
+          🇪🇸 {t("settings.spanish")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -58,7 +94,7 @@ export function Layout({ children }: LayoutProps) {
       Notification.requestPermission().then(permission => {
         if (permission === "granted") {
           new Notification("Flowly", {
-            body: t("sidebar.reminders_active") || "Reminders enabled!",
+            body: t("sidebar.reminders_active"),
             icon: "/assets/logo.png"
           });
         }
@@ -82,8 +118,8 @@ export function Layout({ children }: LayoutProps) {
             return (
               <Link key={item.href} href={item.href} className={cn(
                 "flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 whitespace-nowrap",
-                isActive 
-                  ? "bg-primary/10 text-primary font-medium" 
+                isActive
+                  ? "bg-primary/10 text-primary font-medium"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
               )}>
                 <Icon className={cn("w-5 h-5", isActive ? "stroke-[2.5px]" : "stroke-2")} />
@@ -92,18 +128,20 @@ export function Layout({ children }: LayoutProps) {
             );
           })}
         </nav>
+
         <div className="mt-auto p-4 border-t border-border hidden md:block space-y-4">
-          <Button 
-            variant="outline" 
-            size="sm" 
+          <Button
+            variant="outline"
+            size="sm"
             className="w-full justify-start gap-2"
             onClick={requestNotificationPermission}
           >
             <Bell className="w-4 h-4" />
             {t("sidebar.reminders")}
           </Button>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
             <ThemeToggle />
+            <LanguageSelector />
           </div>
         </div>
       </aside>

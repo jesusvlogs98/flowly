@@ -1,199 +1,166 @@
 import type { Express } from "express";
-import { createServer, type Server } from "http";
-import { storage } from "./storage";
-import { api } from "@shared/routes";
-import { z } from "zod";
-import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
-import { isAuthenticated } from "./replit_integrations/auth";
+import { db } from "./db";
+import { requireAuth, register, login, logout, getMe } from "./auth";
+import {
+  monthlyGoals, habits, habitCompletions, dailyLogs, todos, permanentNotes
+} from "@shared/schema";
+import { eq, and, between } from "drizzle-orm";
 
-// Bypass auth for now, use a static guest user ID
-// export async function registerRoutes(
-//   httpServer: Server,
-//   app: Express
-// ): Promise<Server> {
-//   // Setup Auth
-//   await setupAuth(app);
-//   registerAuthRoutes(app);
-
-//   // Protected middleware for API routes
-//   const requireAuth = isAuthenticated;
-
-export async function registerRoutes(
-  httpServer: Server,
-  app: Express
-): Promise<Server> {
-  // Setup Auth (still kept for structure but bypassed)
-  // await setupAuth(app); 
-  // registerAuthRoutes(app);
-
-  // Mock middleware that injects a guest user
-  const requireAuth = (req: any, res: any, next: any) => {
-    req.user = { 
-      claims: { 
-        sub: "guest_user_123", // Static guest ID
-        email: "guest@example.com",
-        first_name: "Guest",
-        last_name: "User"
-      } 
-    };
-    next();
-  };
+export function registerRoutes(app: Express) {
+  // Auth
+  app.post("/api/auth/register", register);
+  app.post("/api/auth/login", login);
+  app.post("/api/auth/logout", logout);
+  app.get("/api/auth/me", getMe);
 
   // Monthly Goals
-  app.get(api.monthlyGoals.get.path, requireAuth, async (req: any, res) => {
-    const userId = req.user!.claims.sub;
-    const goal = await storage.getMonthlyGoal(userId, req.params.month);
-    if (!goal) {
-      return res.status(404).json({ message: "Monthly goal not found" });
-    }
-    res.json(goal);
+  app.get("/api/monthly-goals/:month", requireAuth, async (req: any, res) => {
+    const userId = req.session.userId;
+    const [goal] = await db.select().from(monthlyGoals)
+      .where(and(eq(monthlyGoals.userId, userId), eq(monthlyGoals.month, req.params.month)));
+    res.json(goal || null);
   });
 
-  app.post(api.monthlyGoals.upsert.path, requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user!.claims.sub;
-      const input = api.monthlyGoals.upsert.input.parse(req.body);
-      const goal = await storage.upsertMonthlyGoal({ ...input, userId });
-      res.json(goal);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      throw err;
+  app.post("/api/monthly-goals", requireAuth, async (req: any, res) => {
+    const userId = req.session.userId;
+    const { month, mantra, mainGoal, top3 } = req.body;
+    const [existing] = await db.select().from(monthlyGoals)
+      .where(and(eq(monthlyGoals.userId, userId), eq(monthlyGoals.month, month)));
+    if (existing) {
+      const [updated] = await db.update(monthlyGoals)
+        .set({ mantra, mainGoal, top3 })
+        .where(eq(monthlyGoals.id, existing.id))
+        .returning();
+      return res.json(updated);
     }
+    const [created] = await db.insert(monthlyGoals).values({ userId, month, mantra, mainGoal, top3 }).returning();
+    res.json(created);
   });
 
   // Habits
-  app.get(api.habits.list.path, requireAuth, async (req: any, res) => {
-    const userId = req.user!.claims.sub;
-    const habits = await storage.getHabits(userId);
-    res.json(habits);
+  app.get("/api/habits", requireAuth, async (req: any, res) => {
+    const userId = req.session.userId;
+    const result = await db.select().from(habits)
+      .where(and(eq(habits.userId, userId), eq(habits.active, true)));
+    res.json(result);
   });
 
-  app.post(api.habits.create.path, requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user!.claims.sub;
-      const input = api.habits.create.input.parse(req.body);
-      const habit = await storage.createHabit({ ...input, userId });
-      res.status(201).json(habit);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      throw err;
-    }
+  app.post("/api/habits", requireAuth, async (req: any, res) => {
+    const userId = req.session.userId;
+    const [habit] = await db.insert(habits).values({ userId, title: req.body.title }).returning();
+    res.json(habit);
   });
 
-  app.post(api.habits.toggle.path, requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user!.claims.sub;
-      const { date, completed } = req.body;
-      const id = parseInt(req.params.id);
-      const result = await storage.toggleHabitCompletion(userId, id, date, completed);
-      res.json({ completed: result });
-    } catch (err) {
-      res.status(500).json({ message: "Internal server error" });
-    }
+  app.delete("/api/habits/:id", requireAuth, async (req: any, res) => {
+    const userId = req.session.userId;
+    await db.update(habits).set({ active: false })
+      .where(and(eq(habits.id, parseInt(req.params.id)), eq(habits.userId, userId)));
+    res.json({ ok: true });
   });
 
-  app.get(api.habits.completions.path, requireAuth, async (req: any, res) => {
-    const userId = req.user!.claims.sub;
+  // Habit completions
+  app.get("/api/habit-completions", requireAuth, async (req: any, res) => {
+    const userId = req.session.userId;
     const { start, end } = req.query;
-    const completions = await storage.getHabitCompletions(userId, start as string, end as string);
-    res.json(completions);
+    let query = db.select().from(habitCompletions).where(eq(habitCompletions.userId, userId));
+    if (start && end) {
+      query = db.select().from(habitCompletions)
+        .where(and(eq(habitCompletions.userId, userId), between(habitCompletions.date, start as string, end as string)));
+    }
+    res.json(await query);
   });
 
-  // Daily Logs
-  app.get(api.dailyLogs.get.path, requireAuth, async (req: any, res) => {
-    const userId = req.user!.claims.sub;
-    const log = await storage.getDailyLog(userId, req.params.date);
-    if (!log) {
-      // Return default/empty log instead of 404 to simplify frontend
-      return res.json({ date: req.params.date, energyLevel: 5, notes: "" });
+  app.post("/api/habit-completions/toggle", requireAuth, async (req: any, res) => {
+    const userId = req.session.userId;
+    const { habitId, date, completed } = req.body;
+    const [existing] = await db.select().from(habitCompletions)
+      .where(and(eq(habitCompletions.userId, userId), eq(habitCompletions.habitId, habitId), eq(habitCompletions.date, date)));
+    if (existing) {
+      await db.update(habitCompletions).set({ completed }).where(eq(habitCompletions.id, existing.id));
+    } else {
+      await db.insert(habitCompletions).values({ userId, habitId, date, completed });
     }
-    res.json(log);
+    res.json({ ok: true });
   });
 
-  app.post(api.dailyLogs.upsert.path, requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user!.claims.sub;
-      const input = api.dailyLogs.upsert.input.parse(req.body);
-      const log = await storage.upsertDailyLog({ ...input, userId });
-      res.json(log);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      throw err;
+  // Daily logs
+  app.get("/api/daily-logs/:date", requireAuth, async (req: any, res) => {
+    const userId = req.session.userId;
+    const [log] = await db.select().from(dailyLogs)
+      .where(and(eq(dailyLogs.userId, userId), eq(dailyLogs.date, req.params.date)));
+    res.json(log || { date: req.params.date, energyLevel: 5, moodNote: "" });
+  });
+
+  app.post("/api/daily-logs", requireAuth, async (req: any, res) => {
+    const userId = req.session.userId;
+    const { date, energyLevel, moodNote } = req.body;
+    const [existing] = await db.select().from(dailyLogs)
+      .where(and(eq(dailyLogs.userId, userId), eq(dailyLogs.date, date)));
+    if (existing) {
+      const [updated] = await db.update(dailyLogs).set({ energyLevel, moodNote }).where(eq(dailyLogs.id, existing.id)).returning();
+      return res.json(updated);
     }
+    const [created] = await db.insert(dailyLogs).values({ userId, date, energyLevel, moodNote }).returning();
+    res.json(created);
+  });
+
+  app.get("/api/daily-logs", requireAuth, async (req: any, res) => {
+    const userId = req.session.userId;
+    const { start, end } = req.query;
+    let result;
+    if (start && end) {
+      result = await db.select().from(dailyLogs)
+        .where(and(eq(dailyLogs.userId, userId), between(dailyLogs.date, start as string, end as string)));
+    } else {
+      result = await db.select().from(dailyLogs).where(eq(dailyLogs.userId, userId));
+    }
+    res.json(result);
   });
 
   // Todos
-  app.get(api.todos.list.path, requireAuth, async (req: any, res) => {
-    const userId = req.user!.claims.sub;
-    const date = req.query.date as string | undefined;
-    const todos = await storage.getTodos(userId, date);
-    res.json(todos);
+  app.get("/api/todos/:date", requireAuth, async (req: any, res) => {
+    const userId = req.session.userId;
+    const result = await db.select().from(todos)
+      .where(and(eq(todos.userId, userId), eq(todos.date, req.params.date)));
+    res.json(result);
   });
 
-  app.post(api.todos.create.path, requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user!.claims.sub;
-      const input = api.todos.create.input.parse(req.body);
-      const todo = await storage.createTodo({ ...input, userId });
-      res.status(201).json(todo);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      throw err;
-    }
+  app.post("/api/todos", requireAuth, async (req: any, res) => {
+    const userId = req.session.userId;
+    const [todo] = await db.insert(todos).values({ userId, date: req.body.date, text: req.body.text }).returning();
+    res.json(todo);
   });
 
-  app.patch(api.todos.update.path, requireAuth, async (req: any, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const input = api.todos.update.input.parse(req.body);
-      const todo = await storage.updateTodo(id, input);
-      res.json(todo);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      throw err;
-    }
+  app.patch("/api/todos/:id", requireAuth, async (req: any, res) => {
+    const [todo] = await db.update(todos).set(req.body).where(eq(todos.id, parseInt(req.params.id))).returning();
+    res.json(todo);
   });
 
-  app.delete(api.todos.delete.path, requireAuth, async (req: any, res) => {
-    const id = parseInt(req.params.id);
-    await storage.deleteTodo(id);
-    res.status(204).end();
+  app.delete("/api/todos/:id", requireAuth, async (req: any, res) => {
+    await db.delete(todos).where(eq(todos.id, parseInt(req.params.id)));
+    res.json({ ok: true });
   });
 
-  // Persistent Notes
-  app.get(api.notes.list.path, requireAuth, async (req: any, res) => {
-    const userId = req.user!.claims.sub;
-    const notes = await storage.getPersistentNotes(userId);
-    res.json(notes);
+  // Permanent notes
+  app.get("/api/notes", requireAuth, async (req: any, res) => {
+    const userId = req.session.userId;
+    const result = await db.select().from(permanentNotes).where(eq(permanentNotes.userId, userId));
+    res.json(result);
   });
 
-  app.post(api.notes.create.path, requireAuth, async (req: any, res) => {
-    const userId = req.user!.claims.sub;
-    const note = await storage.createPersistentNote(userId, req.body);
+  app.post("/api/notes", requireAuth, async (req: any, res) => {
+    const userId = req.session.userId;
+    const [note] = await db.insert(permanentNotes).values({ userId, title: req.body.title || "", content: req.body.content || "" }).returning();
     res.json(note);
   });
 
-  app.patch(api.notes.update.path, requireAuth, async (req: any, res) => {
-    const id = parseInt(req.params.id);
-    const note = await storage.updatePersistentNote(id, req.body);
+  app.patch("/api/notes/:id", requireAuth, async (req: any, res) => {
+    const [note] = await db.update(permanentNotes).set({ ...req.body, updatedAt: new Date() }).where(eq(permanentNotes.id, parseInt(req.params.id))).returning();
     res.json(note);
   });
 
-  app.delete(api.notes.delete.path, requireAuth, async (req: any, res) => {
-    const id = parseInt(req.params.id);
-    await storage.deletePersistentNote(id);
-    res.status(204).end();
+  app.delete("/api/notes/:id", requireAuth, async (req: any, res) => {
+    await db.delete(permanentNotes).where(eq(permanentNotes.id, parseInt(req.params.id)));
+    res.json({ ok: true });
   });
-
-  return httpServer;
 }

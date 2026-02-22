@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
-import { db } from "./db";
-import { users, registerSchema, loginSchema } from "@shared/schema";
+import { db } from "./db.js";
+import { users, registerSchema, loginSchema } from "../shared/schema.js";
 import { eq } from "drizzle-orm";
 import type { Request, Response } from "express";
 

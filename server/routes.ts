@@ -1,9 +1,9 @@
 import type { Express } from "express";
-import { db } from "./db";
-import { requireAuth, register, login, logout, getMe } from "./auth";
+import { db } from "./db.js";
+import { requireAuth, register, login, logout, getMe } from "./auth.js";
 import {
   monthlyGoals, habits, habitCompletions, dailyLogs, todos, permanentNotes
-} from "@shared/schema";
+} from "../shared/schema.js";
 import { eq, and, between } from "drizzle-orm";
 
 export function registerRoutes(app: Express) {

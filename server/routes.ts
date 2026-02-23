@@ -15,14 +15,14 @@ export function registerRoutes(app: Express) {
 
   // Monthly Goals
   app.get("/api/monthly-goals/:month", requireAuth, async (req: any, res) => {
-    const userId = req.session.userId;
+    const userId = (req as any).userId;
     const [goal] = await db.select().from(monthlyGoals)
       .where(and(eq(monthlyGoals.userId, userId), eq(monthlyGoals.month, req.params.month)));
     res.json(goal || null);
   });
 
   app.post("/api/monthly-goals", requireAuth, async (req: any, res) => {
-    const userId = req.session.userId;
+    const userId = (req as any).userId;
     const { month, mantra, mainGoal, top3 } = req.body;
     const [existing] = await db.select().from(monthlyGoals)
       .where(and(eq(monthlyGoals.userId, userId), eq(monthlyGoals.month, month)));
@@ -39,20 +39,20 @@ export function registerRoutes(app: Express) {
 
   // Habits
   app.get("/api/habits", requireAuth, async (req: any, res) => {
-    const userId = req.session.userId;
+    const userId = (req as any).userId;
     const result = await db.select().from(habits)
       .where(and(eq(habits.userId, userId), eq(habits.active, true)));
     res.json(result);
   });
 
   app.post("/api/habits", requireAuth, async (req: any, res) => {
-    const userId = req.session.userId;
+    const userId = (req as any).userId;
     const [habit] = await db.insert(habits).values({ userId, title: req.body.title }).returning();
     res.json(habit);
   });
 
   app.delete("/api/habits/:id", requireAuth, async (req: any, res) => {
-    const userId = req.session.userId;
+    const userId = (req as any).userId;
     await db.update(habits).set({ active: false })
       .where(and(eq(habits.id, parseInt(req.params.id)), eq(habits.userId, userId)));
     res.json({ ok: true });
@@ -60,7 +60,7 @@ export function registerRoutes(app: Express) {
 
   // Habit completions
   app.get("/api/habit-completions", requireAuth, async (req: any, res) => {
-    const userId = req.session.userId;
+    const userId = (req as any).userId;
     const { start, end } = req.query;
     let query = db.select().from(habitCompletions).where(eq(habitCompletions.userId, userId));
     if (start && end) {
@@ -71,7 +71,7 @@ export function registerRoutes(app: Express) {
   });
 
   app.post("/api/habit-completions/toggle", requireAuth, async (req: any, res) => {
-    const userId = req.session.userId;
+    const userId = (req as any).userId;
     const { habitId, date, completed } = req.body;
     const [existing] = await db.select().from(habitCompletions)
       .where(and(eq(habitCompletions.userId, userId), eq(habitCompletions.habitId, habitId), eq(habitCompletions.date, date)));
@@ -85,14 +85,14 @@ export function registerRoutes(app: Express) {
 
   // Daily logs
   app.get("/api/daily-logs/:date", requireAuth, async (req: any, res) => {
-    const userId = req.session.userId;
+    const userId = (req as any).userId;
     const [log] = await db.select().from(dailyLogs)
       .where(and(eq(dailyLogs.userId, userId), eq(dailyLogs.date, req.params.date)));
     res.json(log || { date: req.params.date, energyLevel: 5, moodNote: "" });
   });
 
   app.post("/api/daily-logs", requireAuth, async (req: any, res) => {
-    const userId = req.session.userId;
+    const userId = (req as any).userId;
     const { date, energyLevel, moodNote } = req.body;
     const [existing] = await db.select().from(dailyLogs)
       .where(and(eq(dailyLogs.userId, userId), eq(dailyLogs.date, date)));
@@ -105,7 +105,7 @@ export function registerRoutes(app: Express) {
   });
 
   app.get("/api/daily-logs", requireAuth, async (req: any, res) => {
-    const userId = req.session.userId;
+    const userId = (req as any).userId;
     const { start, end } = req.query;
     let result;
     if (start && end) {
@@ -119,14 +119,14 @@ export function registerRoutes(app: Express) {
 
   // Todos
   app.get("/api/todos/:date", requireAuth, async (req: any, res) => {
-    const userId = req.session.userId;
+    const userId = (req as any).userId;
     const result = await db.select().from(todos)
       .where(and(eq(todos.userId, userId), eq(todos.date, req.params.date)));
     res.json(result);
   });
 
   app.post("/api/todos", requireAuth, async (req: any, res) => {
-    const userId = req.session.userId;
+    const userId = (req as any).userId;
     const [todo] = await db.insert(todos).values({ userId, date: req.body.date, text: req.body.text }).returning();
     res.json(todo);
   });
@@ -143,13 +143,13 @@ export function registerRoutes(app: Express) {
 
   // Permanent notes
   app.get("/api/notes", requireAuth, async (req: any, res) => {
-    const userId = req.session.userId;
+    const userId = (req as any).userId;
     const result = await db.select().from(permanentNotes).where(eq(permanentNotes.userId, userId));
     res.json(result);
   });
 
   app.post("/api/notes", requireAuth, async (req: any, res) => {
-    const userId = req.session.userId;
+    const userId = (req as any).userId;
     const [note] = await db.insert(permanentNotes).values({ userId, title: req.body.title || "", content: req.body.content || "" }).returning();
     res.json(note);
   });

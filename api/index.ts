@@ -1,23 +1,27 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import express from "express";
 import session from "express-session";
-import MemoryStore from "memorystore";
+import connectPgSimple from "connect-pg-simple";
+import pg from "pg";
 import { registerRoutes } from "../server/routes.js";
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-const Store = MemoryStore(session);
+const PgSession = connectPgSimple(session);
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "flowly-secret",
     resave: false,
     saveUninitialized: false,
-    store: new Store({ checkPeriod: 86400000 }),
+    store: new PgSession({ pool, tableName: "session" }),
     cookie: {
       httpOnly: true,
       secure: true,
+      sameSite: "none",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     },
   })
